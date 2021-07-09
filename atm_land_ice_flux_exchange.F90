@@ -126,6 +126,7 @@ module atm_land_ice_flux_exchange_mod
             flux_down_from_atmos, &
             flux_up_to_atmos,     &
             flux_atmos_to_ocean,  &
+            flux_ocean_to_atmos,  &
             flux_ex_arrays_dealloc,&
             atm_stock_integrate,  &
             send_ice_mask_sic
@@ -160,6 +161,7 @@ module atm_land_ice_flux_exchange_mod
   integer :: id_co2_atm_dvmr, id_co2_surf_dvmr
 ! 2017/08/15 jgj added
   integer :: id_co2_bot, id_co2_flux_pcair_atm, id_o2_flux_pcair_atm
+  integer :: id_export2atm_values
 
   integer, allocatable :: id_tr_atm(:), id_tr_surf(:), id_tr_flux(:), id_tr_mol_flux(:)
   integer, allocatable :: id_tr_mol_flux0(:) !f1p
@@ -449,6 +451,7 @@ contains
 
     do i = 1,n_exch_tr
        call get_tracer_names( MODEL_ATMOS, tr_table(i)%atm, tr_name )
+       write(outunit,*)'Exchange tracer index for '//trim(tr_name),' : ',i
        if(lowercase(tr_name)=='sphum') then
           isphum = i
        endif
@@ -3040,6 +3043,41 @@ contains
 
   end subroutine flux_ex_arrays_dealloc
 
+  subroutine flux_ocean_to_atmos(Time, Atm, Ice_boundary, Ice)
+  use coupler_types_mod, only : ind_export_value_ice,ind_export_value_atm
+  type(time_type),               intent(in)   :: Time         !< Current time
+  type(atmos_data_type),         intent(inout):: Atm          !< A derived data type to specify atmosphere boundary data
+  type(atmos_ice_boundary_type), intent(inout):: Ice_boundary !< A derived data type to specify properties and fluxes passed
+                                                                  !! from atmosphere to ice
+  type(ice_data_type),           intent(inout):: Ice
+
+  integer :: n,m
+  logical :: used
+  real, dimension(n_xgrid_sfc) :: ex_tmp
+  ex_tmp=0.0
+    !ice%ocean_fields%%num_bcs = ex_gas_fluxes%num_bcs = Atm%fields%num_bcs = Total number of OCN tracers created by generic_tracers/tracer_manager/field_manager
+    !
+    !ex_gas_fluxes%bc(n)%num_fields    = number of ATM flux properties for each tracer (flux,deltap,kw,flux0) (for generic tracers with gas flux)
+    !ice%ocean_fields%bc(n)%num_fields = number of ICE flux properties for each tracer (alpha,csurf,sc_no)    (for generic tracers with gas flux)
+    !Atm%fields%bc(n)%num_fields       = number of ATM flux properties for each tracer (pcair,u10,psurf)
+    !
+    !Coupler tracers in ATM and OCN can be tied together through aof_set_coupler() calls in the two components
+    !in order to exchange fluxes or boundary values via flux_exchange mechanism. 
+    do n = 1, ice%ocean_fields%num_bcs
+       !write(stdout(),*)'DEBUG flux_ocean_to_atmos:'//trim(Ice%ocean_fields%bc(n)%name), n_xgrid_sfc
+       if(Ice%ocean_fields%bc(n)%flux_type  .eq. 'export_value') then
+          !write(stdout(),*) 'DEBUG flux_ocean_to_atmos put:'//trim(Ice%ocean_fields%bc(n)%field(ind_export_value_ice)%name)
+          call put_to_xgrid (Ice%ocean_fields%bc(n)%field(ind_export_value_ice)%values, 'OCN', ex_tmp, xmap_sfc)
+
+          !write(stdout(),*) 'DEBUG flux_ocean_to_atmos get:'//trim(Atm%fields%bc(n)%field(ind_export_value_ice)%name),n,ind_export_value_ice
+          call get_from_xgrid (Atm%fields%bc(n)%field(ind_export_value_atm)%values, 'ATM', ex_tmp, xmap_sfc)
+
+          !if (id_export2atm_values) used = send_data ( id_export2atm_values, Atm%fields%bc(n)%field(ind_export_value_atm)%values, Time )
+       end if
+    end do
+
+  end subroutine flux_ocean_to_atmos
+
   subroutine flux_atmos_to_ocean(Time, Atm, Ice_boundary, Ice)
   type(time_type),               intent(in)   :: Time         !< Current time
   type(atmos_data_type),         intent(inout):: Atm          !< A derived data type to specify atmosphere boundary data
@@ -3456,6 +3494,8 @@ contains
 
     ! id_nh3_flux_atm0 = register_diag_field (mod_name, 'nh3_flux_atm0', atmos_axes, Time, &
     !        'nh3 flux out of the ocean assuming not nh3 in the atmosphere', 'mol/m2/s')
+    !id_export2atm_values = register_diag_field(mod_name, 'export2atm_flux_OCNsurf', atmos_axes, Time, &
+    !        'value of export2atm_flux_OCNsurf', 'NA')
 
 
     id_q_flux = register_diag_field( mod_name, 'evap',       atmos_axes, Time, &

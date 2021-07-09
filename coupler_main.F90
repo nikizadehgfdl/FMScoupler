@@ -400,6 +400,7 @@ program coupler_main
   use flux_exchange_mod,       only: flux_check_stocks, flux_init_stocks
   use flux_exchange_mod,       only: flux_ocean_from_ice_stocks, flux_ice_to_ocean_stocks
   use flux_exchange_mod,       only: flux_atmos_to_ocean, flux_ex_arrays_dealloc
+  use flux_exchange_mod,       only: flux_ocean_to_atmos
 
   use atmos_tracer_driver_mod, only: atmos_tracer_driver_gather_data
 
@@ -799,6 +800,7 @@ program coupler_main
       !   ------ atmos/fast-land/fast-ice integration loop -------
 
       call mpp_clock_begin(newClock7)
+      call flux_ocean_to_atmos(Time_atmos, Atm, Atmos_ice_boundary, Ice)
       do na = 1, num_atmos_calls
         if (do_chksum) call atmos_ice_land_chksum('top_of_atmos_loop-', (nc-1)*num_atmos_calls+na, Atm, Land, Ice, &
                  Land_ice_atmos_boundary, Atmos_ice_boundary, Atmos_land_boundary)
@@ -807,7 +809,7 @@ program coupler_main
 
         if (do_atmos) then
           call mpp_clock_begin(newClocka)
-          call atmos_tracer_driver_gather_data(Atm%fields, Atm%tr_bot)
+          call atmos_tracer_driver_gather_data(Atm%fields, Atm%tr_bot, Time_atmos)
           call mpp_clock_end(newClocka)
         endif
 

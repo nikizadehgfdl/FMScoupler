@@ -550,6 +550,7 @@ module flux_exchange_mod
   use atm_land_ice_flux_exchange_mod, only: generate_sfc_xgrid, flux_down_from_atmos
   use atm_land_ice_flux_exchange_mod, only: flux_up_to_atmos, atm_stock_integrate, send_ice_mask_sic
   use atm_land_ice_flux_exchange_mod, only: flux_atmos_to_ocean, flux_ex_arrays_dealloc
+  use atm_land_ice_flux_exchange_mod, only: flux_ocean_to_atmos
   use land_ice_flux_exchange_mod,     only: flux_land_to_ice, land_ice_flux_exchange_init
   use ice_ocean_flux_exchange_mod,    only: ice_ocean_flux_exchange_init
   use ice_ocean_flux_exchange_mod,    only: flux_ocean_to_ice, flux_ocean_to_ice_finish
@@ -565,6 +566,7 @@ module flux_exchange_mod
      flux_up_to_atmos,     &
      flux_land_to_ice,     &
      flux_atmos_to_ocean,  &
+     flux_ocean_to_atmos,  &
      flux_ex_arrays_dealloc,&
      flux_ice_to_ocean,    &
      flux_ice_to_ocean_finish, &

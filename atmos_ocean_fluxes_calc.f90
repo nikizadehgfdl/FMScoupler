@@ -245,6 +245,8 @@ contains
           endif
         elseif (gas_fluxes%bc(n)%flux_type .eq. 'air_sea_deposition') then
           cycle !air_sea_deposition is done in another subroutine
+        elseif (gas_fluxes%bc(n)%flux_type .eq. 'export_value') then
+          cycle !export_value/direct method/implementation currently does not need any flux treatment  
         elseif (gas_fluxes%bc(n)%flux_type .eq. 'land_sea_runoff') then
           if (gas_fluxes%bc(n)%param(1) .le. 0.0) then
             write (error_string, '(1pe10.3)') gas_fluxes%bc(n)%param(1)
