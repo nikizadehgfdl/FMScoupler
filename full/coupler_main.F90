@@ -490,6 +490,7 @@ program coupler_main
   logical :: do_debug=.FALSE.       !< If .TRUE. print additional debugging messages.
   integer :: check_stocks = 0 ! -1: never 0: at end of run only n>0: every n coupled steps
   logical :: use_hyper_thread = .false.
+  logical :: ATM_first=.TRUE.  !< If .TRUE., ATM pelist starts with rank 1, otherwise OCN pelist starts with rank 1
 
   namelist /coupler_nml/ current_date, calendar, force_date_from_namelist,         &
                          months, days, hours, minutes, seconds, dt_cpld, dt_atmos, &
@@ -499,7 +500,7 @@ program coupler_main
                          concurrent, do_concurrent_radiation, use_lag_fluxes,      &
                          check_stocks, restart_interval, do_debug, do_chksum,      &
                          use_hyper_thread, concurrent_ice, slow_ice_with_ocean,    &
-                         do_endpoint_chksum, combined_ice_and_ocean
+                         do_endpoint_chksum, combined_ice_and_ocean, ATM_first
 
   integer :: initClock, mainClock, termClock
 
@@ -1304,7 +1305,7 @@ contains
 
     !Set up and declare all the needed pelists
     call ensemble_pelist_setup(concurrent, atmos_npes, ocean_npes, land_npes, ice_npes, &
-                               Atm%pelist, Ocean%pelist, Land%pelist, Ice%fast_pelist)
+                               Atm%pelist, Ocean%pelist, Land%pelist, Ice%fast_pelist, ATM_first)
 
 !set up affinities based on threads
 
@@ -1328,9 +1329,14 @@ contains
       Ice%slow_pelist(:) = Ice%fast_pelist(:)
       if(concurrent) then
          allocate(slow_ice_ocean_pelist(ocean_npes+ice_npes))
-         slow_ice_ocean_pelist(1:ice_npes) = Ice%slow_pelist(:)
-         slow_ice_ocean_pelist(ice_npes+1:ice_npes+ocean_npes) = Ocean%pelist(:)
-    else
+         if(ATM_first) then
+           slow_ice_ocean_pelist(1:ice_npes) = Ice%slow_pelist(:)
+           slow_ice_ocean_pelist(ice_npes+1:ice_npes+ocean_npes) = Ocean%pelist(:)
+         else
+           slow_ice_ocean_pelist(1:ice_npes) = Ocean%pelist(:)
+           slow_ice_ocean_pelist(ice_npes+1:ice_npes+ocean_npes) = Ice%slow_pelist(:)
+         endif
+      else
          if(ice_npes .GE. ocean_npes) then
             allocate(slow_ice_ocean_pelist(ice_npes))
             slow_ice_ocean_pelist(:) = Ice%slow_pelist(:)
