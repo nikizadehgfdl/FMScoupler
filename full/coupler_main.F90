@@ -63,39 +63,189 @@
 !!     seconds. A run length of zero is not a valid option.
 !! -# The run length must be an intergal multiple of the coupling timestep dt_cpld.
 !!
-!! \section Main Program Example
+!! \section skeleton Coupler in a nutshell 
+!![More details](https://nikizadehgfdl.github.io/coupler.html)
 !!
 !! ~~~~~~~~~~{.f90}
-!! DO slow time steps (ocean)
-!!    call flux_ocean_to_ice
 !!
-!!    call set_ice_surface_fields
+!! call fms_init
+!! call coupler_init
+!! 
+!! DO nc = 1, num_cpld_calls !slow time steps (dt_cpld)
+!!    call mpp_set_current_pelist(slow_ice_ocean_pelist)
+!!    call flux_ocean_to_ice( Time, Ocean, Ice, Ocean_ice_boundary ) !Ocean_ice_boundary%* = Ocean%*
+!!    call flux_ice_to_ocean( Time, Ice, Ocean, Ice_ocean_boundary ) !Ice_ocean_boundary%* = Ice%*
 !!
-!!    DO fast time steps (atmos)
+!!    call set_ice_surface_fields(Ice) if (Ice%fast_ice_pe)
+!!
+!!    call mpp_set_current_pelist(Atm%pelist) 
+!!    call generate_sfc_xgrid( Land, Ice ) !Regenerate the xgrid map since sea-ice partitions were changed in the last iteration
+!!
+!!    DO na = 1, num_atmos_calls  !fast time steps (dt_atmos)
 !!       call flux_calculation
-!!
 !!       call ATMOS_DOWN
-!!
 !!       call flux_down_from_atmos
-!!
 !!       call LAND_FAST
-!!
 !!       call ICE_FAST
-!!
 !!       call flux_up_to_atmos
-!!
 !!       call ATMOS_UP
 !!    ENDDO
 !!
-!!    call ICE_SLOW
+!!    call update_land_model_slow(Atmos_land_boundary,Land)
+!!    call flux_land_to_ice( Time, Land, Ice, Land_ice_boundary )
+!!    call update_ice_model_slow
 !!
-!!    call flux_ice_to_ocean
+!!    call flux_ice_to_ocean if(.NOT. use_lag_fluxes)
+!!    call flux_ice_to_ocean_finish(Time_flux_ice_to_ocean, Ice_ocean_boundary) !NO exchange, just data_overrides
+!!                               .g.,  call data_override('OCN', 'u_flux',    Ice_Ocean_Boundary%u_flux   , Time )
 !!
-!!    call OCEAN
+!!    call update_ocean_model( Ice_ocean_boundary, Ocean_state,  Ocean, Time_ocean, Time_step_cpld )
+!!
 !! ENDDO
 !! ~~~~~~~~~~
-
-!> \page coupler_config Coupler Configuration
+!!\section details Coupler Details 
+!!\subsection coupler_init Initialization
+!!This consists of initializing fms infrastructure (setting up pelists, MPI communicators, FMSdiagnostics tools, etc)
+!!as well as the coupler which particularly initializes/restarts the component model states and setup a exchange map 
+!!by reading/loading the exchange grid for later use.  
+!!
+!! ~~~~~~~~~~{.f90}
+!! call fms_init
+!! call coupler_init
+!!      |--> Initialize coupler and component states
+!!      |--> Generate xmap_sfc by loading the exchange grid
+!!           call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /), (/ Atm%Domain, Ice%Domain, Land%Domain /), &
+!!                           "INPUT/grid_spec.nc", Atm%grid, lnd_ug_domain=Land%ug_domain)
+!! ~~~~~~~~~~
+!!\subsection pelists Setting Processor layout
+!!STUB!
+!!\subsection setup_xmap setup_xmap()
+!!STUB! general remarks on ATM/OCN cores split, ATM pelist, OCN pelist, mpp_domains, mpp_set_current_pelist
+!!\section slow_loop1 Slow Loop Updates stage1
+!!\subsection flux_ocean_to_ice flux_ocean_to_ice()
+!!Updates the type members Ocean_ice_boundary%* = Ocean%*
+!!
+!!Note: Ocean_ice_boundary is a type exposed from the Ice   model, it is the skin of Ice.
+!!\subsection flux_ice_to_ocean flux_ice_to_ocean()
+!!Updates the type members Ice_ocean_boundary%* = Ice%*
+!!
+!!Note: Ice_ocean_boundary is a type exposed from the Ocean model, it is the skin of Ocean.
+!!\subsection set_ice_surface_fields set_ice_surface_fields(Ice)
+!!STUB
+!!\subsection generate_sfc_xgrid generate_sfc_xgrid( Land, Ice )
+!!STUB
+!!
+!!\section fast_loop ATM Fast Loop
+!! ~~~~~~~~~~{.f90}
+!! DO na = 1, num_atmos_calls  !fast time steps (dt_atmos)
+!!   call atmos_tracer_driver_gather_data(Atm%fields, Atm%tr_bot)
+!!   call sfc_boundary_layer(dt_atmos, Time_atmos, Atm, Land, Ice, Land_ice_atmos_boundary )
+!!   call update_atmos_model_dynamics( Atm )
+!!   call update_atmos_model_radiation( Land_ice_atmos_boundary, Atm )
+!!   call update_atmos_model_down( Land_ice_atmos_boundary, Atm )
+!!   call flux_down_from_atmos( Time_atmos, Atm, Land, Ice, & Land_ice_atmos_boundary, & Atmos_land_boundary, & Atmos_ice_boundary )
+!!   call update_land_model_fast( Atmos_land_boundary, Land )
+!!   call update_ice_model_fast( Atmos_ice_boundary, Ice )
+!!   call flux_up_to_atmos( Time_atmos, Land, Ice, Land_ice_atmos_boundary, & Atmos_land_boundary, Atmos_ice_boundary )
+!!   call update_atmos_model_up( Land_ice_atmos_boundary, Atm)
+!!   call flux_atmos_to_ocean(Time_atmos, Atm, Atmos_ice_boundary, Ice)
+!!   call flux_ex_arrays_dealloc
+!!   call update_atmos_model_state( Atm )
+!! ENDDO
+!! ~~~~~~~~~~
+!!\subsection    call1 atmos_tracer_driver_gather_data(Atm%fields, Atm%tr_bot)
+!!STUB
+!!\subsection    call2 sfc_boundary_layer(dt_atmos, Time_atmos, Atm, Land, Ice, Land_ice_atmos_boundary )
+!!Computes explicit fluxes as well as their derivatives that will be used to compute implicit flux corrections.
+!!Heavy use of flux exchange.
+!!E.g., suppose we have the temperature at the skin of OCN (Ice%t_surf ) and the LND surface (Land%t_surf)
+!!we want to calculate the 4th power of surface temperature and make it known to the ATM component.
+!!For this to work xmap_sfc should have been (re)generated by two calls in the init routine: 
+!! ~~~~~~~~~~{.f90}
+!!   call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /), (/ Atm%Domain, Ice%Domain, Land%Domain /),        &
+!!                              "INPUT/grid_spec.nc", Atm%gd'xrid, lnd_ug_domain=Land%ug_domain)
+!!   call generate_sfc_xgrid( Land, Ice )	!determines n_xgrid_sfc		      
+!!
+!!   allocte(ex_t_surf(n_xgrid_sfc))  !prepare a 1d array on the exchange grid
+!!   call put_to_xgrid (Ice%t_surf,  'OCN', ex_t_surf, xmap_sfc) !put OCN temp on the exgrid
+!!   call put_to_xgrid (Land%t_surf, 'LND', ex_t_surf, xmap_sfc) !put LND temp on the exgrid
+!!   do i = is, ie ; ex_t_surf4(i) = ex_t_surf(i) ** 4 ; enddo   !do the calculation on exgrid
+!!   call get_from_xgrid (Land_Ice_Atmos_Boundary%t, 'ATM', ex_t_surf4,  xmap_sfc, complete=.false.) !get t4 on ATM grid
+!! ~~~~~~~~~~
+!!
+!!\subsection    call3 update_atmos_model_dynamics( Atm )
+!!\subsection    call4 update_atmos_model_radiation( Land_ice_atmos_boundary, Atm )
+!!\subsection    call5 update_atmos_model_down( Land_ice_atmos_boundary, Atm )
+!!\subsection    call6 flux_down_from_atmos( Time_atmos, Atm, Land, Ice, & Land_ice_atmos_boundary, & Atmos_land_boundary, & Atmos_ice_boundary )
+!!Pass the ATM fluxes downwards by "put"ting them on the exgrid side 1 for the LND or ICE to "get" them. E.g.,
+!! ~~~~~~~~~~{.f90}
+!!    !put
+!!    call put_to_xgrid (Atm%flux_sw_dir, 'ATM', ex_flux_sw_dir, xmap_sfc, complete=.false.)
+!!    call put_to_xgrid (Atm%flux_lw, 'ATM', ex_flux_lwd, xmap_sfc, remap_method=remap_method, complete=.true.)
+!!    !compute
+!!    do i = is, ie; ex_flux_sw(i) = ex_flux_sw(i) * ex_albedo_fix(i) ; enddo
+!!    do i = is, ie; ex_flux_lw(i) = ex_flux_lwd(i) - ex_flux_lw(i) ; enddo
+!!    !get
+!!    call get_from_xgrid_ug (Land_boundary%sw_flux, 'LND', ex_flux_sw,   xmap_sfc)
+!!    call get_from_xgrid_ug (Land_boundary%lw_flux, 'LND', ex_flux_lw,   xmap_sfc)
+!!    call get_from_xgrid (Ice_boundary%lw_flux,  'OCN', ex_flux_lw,   xmap_sfc) 
+!! ~~~~~~~~~~
+!!\subsection    call7 update_land_model_fast( Atmos_land_boundary, Land )
+!!\subsection    call8 update_ice_model_fast( Atmos_ice_boundary, Ice )
+!!\subsection    call9 flux_up_to_atmos( Time_atmos, Land, Ice, Land_ice_atmos_boundary, & Atmos_land_boundary, Atmos_ice_boundary )
+!!Corrects the fluxes for consistency with the new surface temperatures in land and ice models. E.g., 
+!! ~~~~~~~~~~{.f90}
+!!    call data_override_ug ( 'LND', 't_surf', Land%t_surf, Time)
+!!    call put_to_xgrid (Land%t_ca,   'LND', ex_t_ca_new,   xmap_sfc)
+!!    !NOTE: ex_t_ca,ex_flux_t,ex_dhdt_surf were calculated in sfc_boundary_layer() at the begining of ATM loop !!!
+!!    ex_dt_t_ca(i)  = ex_t_ca_new(i) - ex_t_ca(i)                            
+!!    ex_flux_t(i)   = ex_flux_t(i)   + ex_dt_t_ca(i)   * ex_dhdt_surf(i)    
+!!    call get_from_xgrid (Land_Ice_Atmos_Boundary%shflx,'ATM', ex_flux_t , xmap_sfc)
+!! ~~~~~~~~~~
+!!\subsection    call10 update_atmos_model_up( Land_ice_atmos_boundary, Atm)
+!!\subsection    call11 flux_atmos_to_ocean(Time_atmos, Atm, Atmos_ice_boundary, Ice)
+!!ATM puts the fluxes to exgrid for ICE to get
+!!ICE accumulates the fluxes over ATM fast updates 
+!!E.g.,
+!! ~~~~~~~~~~{.f90}
+!!     !ATM calculations
+!!     call atmos_tracer_driver_gather_data_down(Atm%fields, Atm%tr_bot)
+!!     !ATM puts to exgrid
+!!     call put_to_xgrid (Atm%fields%bc(n)%field(m)%values, 'ATM',            ex_gas_fields_atm%bc(n)%field(m)%values, xmap_sfc, remap_method=remap_method)
+!!     !exgrid calculations
+!!     call atmos_ocean_dep_fluxes_calc(ex_gas_fields_atm, ex_gas_fields_ice, ex_gas_fluxes, ex_seawater)
+!!     !ICE gets
+!!     call get_from_xgrid (Ice_boundary%fluxes%bc(n)%field(m)%values, 'OCN', ex_gas_fluxes%bc(n)%field(m)%values, xmap_sfc)
+!!     !ICE accumulates
+!!     call update_ice_atm_deposition_flux( Ice_boundary, Ice )
+!! ~~~~~~~~~~
+!!\subsection    call12 flux_ex_arrays_dealloc
+!!\subsection    call13 update_atmos_model_state( Atm )
+!!
+!!\section slow_loop2 Slow Loop Updates stage 2
+!!\subsection    update_land_model_slow update_land_model_slow(Atmos_land_boundary,Land)
+!!\subsection    flux_land_to_ice flux_land_to_ice( Time, Land, Ice, Land_ice_boundary )
+!!Conservative transfer of water and snow discharge from the land model to sea ice (ocean skin). E.g., 
+!! ~~~~~~~~~~{.f90}
+!!       !xmap_runoff should have been created in an initialization call
+!!       call setup_xmap(xmap_runoff, (/ 'LND', 'OCN' /), (/ Land%Domain, Ice%Domain /),"INPUT/grid_spec.nc")
+!!       !LND puts
+!!       call put_to_xgrid   ( Land%discharge, 'LND', ex_runoff,  xmap_runoff)
+!!       !ICE gets
+!!       call get_from_xgrid (ice_buf,         'OCN', ex_runoff,  xmap_runoff)
+!!       Land_Ice_Boundary%runoff = ice_buf(:,:,1);!!\subsection    update_ice_model_slow update_ice_model_slow
+!! ~~~~~~~~~~
+!!
+!!\subsection    flux_ice_to_ocean_finish flux_ice_to_ocean_finish(Time_flux_ice_to_ocean, Ice_ocean_boundary) 
+!!NO exchange, just data_overrides
+!!                               .g.,  call data_override('OCN', 'u_flux',    Ice_Ocean_Boundary%u_flux   , Time )
+!!
+!!\subsection    update_ocean_model update_ocean_model( Ice_ocean_boundary, Ocean_state,  Ocean, Time_ocean, Time_step_cpld )
+!!
+!!
+!!
+!!
+!! \section coupler_config Coupler Configuration
 !!
 !! coupler_main is configured via the coupler_nml namelist in the `input.nml` file.
 !! The following table contains the available namelist variables.
@@ -284,15 +434,8 @@
 !!   </tr>
 !! </table>
 !!
-!! \note
-!! -# If no value is set for current_date, start_date, or calendar (or default value specified) then the value from
-!!    restart file "INPUT/coupler.res" will be used. If neither a namelist value or restart file value exist the
-!!    program will fail.
-!! -# The actual run length will be the sum of months, days, hours, minutes, and seconds. A run length of zero is not a
-!!    valid option.
-!! -# The run length must be an intergal multiple of the coupling timestep dt_cpld.
-
-!> \throw FATAL, "no namelist value for current_date"
+!! \section errors Summary of errors
+!! \throw FATAL, "no namelist value for current_date"
 !!     A namelist value for current_date must be given if no restart file for
 !!     coupler_main (INPUT/coupler.res) is found.
 !! \throw FATAL, "invalid namelist value for calendar"
@@ -638,6 +781,8 @@ program coupler_main
   newClock13 = mpp_clock_id( 'intermediate restart' )
   newClock14 = mpp_clock_id( 'final flux_check_stocks' )
 
+!! \section Main Main Coupling loop
+!!  
   do nc = 1, num_cpld_calls
     if (do_chksum) call coupler_chksum('top_of_coupled_loop+', nc)
     call mpp_set_current_pelist()
@@ -756,6 +901,7 @@ program coupler_main
       !   ------ atmos/fast-land/fast-ice integration loop -------
 
       call mpp_clock_begin(newClock7)
+
       do na = 1, num_atmos_calls
         if (do_chksum) call atmos_ice_land_chksum('top_of_atmos_loop-', (nc-1)*num_atmos_calls+na, Atm, Land, Ice, &
                  Land_ice_atmos_boundary, Atmos_ice_boundary, Atmos_land_boundary)
