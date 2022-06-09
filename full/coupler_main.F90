@@ -70,7 +70,7 @@
 !!
 !! call fms_init
 !! call coupler_init
-!! 
+!! call flux_exchange_init
 !! DO nc = 1, num_cpld_calls !slow time steps (dt_cpld)
 !!    call mpp_set_current_pelist(slow_ice_ocean_pelist)
 !!    call flux_ocean_to_ice( Time, Ocean, Ice, Ocean_ice_boundary ) !Ocean_ice_boundary%* = Ocean%*
@@ -112,15 +112,37 @@
 !! ~~~~~~~~~~{.f90}
 !! call fms_init
 !! call coupler_init
-!!      |--> Initialize coupler and component states
-!!      |--> Generate xmap_sfc by loading the exchange grid
-!!           call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /), (/ Atm%Domain, Ice%Domain, Land%Domain /), &
-!!                           "INPUT/grid_spec.nc", Atm%grid, lnd_ug_domain=Land%ug_domain)
+!!      |--> Initialize coupler, fms packages, and component models states
+!!      |--> if (Atm%pe) call atmos_model_init￼( Atm, Time_init, Time, Time_step_atmos, do_concurrent_radiation)
+!!      |--> if (Lnd%pe) call land_model_init￼( Atmos_land_boundary, Land, Time_init, Time, Time_step_atmos, Time_step_cpld )
+!!      |--> if (Ice%pe) call ice_model_init￼(Ice, Time_init, Time, Time_step_atmos, Time_step_cpld, Verona_coupler=.false.,concurrent_ice=concurrent_ice,  gas_fluxes=gas_fluxes, gas_fields_ocn=gas_fields_ocn )
+!!      |--> if (Ocn%pe) call ocean_model_init￼( Ocean, Ocean_state, Time_init, Time, gas_fields_ocn=gas_fields_ocn  )
+!!
+!!      |--> call flux_exchange_init
+!!                |--> call atm_land_ice_flux_exchange_init
+!!                          |--> xgrid_init￼(remap_method)
+!!                          |--> call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /), (/ Atm%Domain, Ice%Domain, Land%Domain /), &
+!!                                     "INPUT/grid_spec.nc", Atm%grid)
+!!                          |--> call generate_sfc_xgrid￼( Land, Ice )
+!!                          |--> call surface_flux_init￼()
+!!                |--> call land_ice_flux_exchange_init￼
+!!                |--> call ice_ocean_flux_exchange_init￼
+!!                |--> Generate xmap_sfc by loading the exchange grid
 !! ~~~~~~~~~~
-!!\subsection pelists Setting Processor layout
-!!STUB!
+!!\subsection pelists Assigning the Processors/Cores to Components
+!!Each component in each ensemble gets a pelist. E.g., ATM%pelist is an array of integers correspoding to the MPI ranks for ATM component to use. Note that these are MPI ranks and do not include the cores used for openmp threads.
+!!
+!!At any point in the code one can use a call to mpp_set_current_pelist() to restrict the following block of  code on a particular core list. E.g., the following snippet makes the mpi ranks listed in ocean%pelist (and only those) do something
+!! ~~~~~~~~~~{.f90}
+!! call mpp_set_current_pelist(Ocean%pelist)
+!! call do_something()
+!! call mpp_set_current_pelist()
+!! ~~~~~~~~~~{.f90}
+!!\subsection comp_init Component Model Initialization
+!!The component models are responsible for setting  a process layout (mpp domain) for the pelist assigend to them.
+!!Also, they initialize their internal by either reading their own restart files or other data (observation, reanalysis, ...) dependign on the model configuration.
 !!\subsection setup_xmap setup_xmap()
-!!STUB! general remarks on ATM/OCN cores split, ATM pelist, OCN pelist, mpp_domains, mpp_set_current_pelist
+!!
 !!\section slow_loop1 Slow Loop Updates stage1
 !!\subsection flux_ocean_to_ice flux_ocean_to_ice()
 !!Updates the type members Ocean_ice_boundary%* = Ocean%*
@@ -164,7 +186,7 @@
 !! ~~~~~~~~~~{.f90}
 !!   call setup_xmap(xmap_sfc, (/ 'ATM', 'OCN', 'LND' /), (/ Atm%Domain, Ice%Domain, Land%Domain /),        &
 !!                              "INPUT/grid_spec.nc", Atm%gd'xrid, lnd_ug_domain=Land%ug_domain)
-!!   call generate_sfc_xgrid( Land, Ice )	!determines n_xgrid_sfc		      
+!!   call generate_sfc_xgrid( Land, Ice )!determines n_xgrid_sfc
 !!
 !!   allocte(ex_t_surf(n_xgrid_sfc))  !prepare a 1d array on the exchange grid
 !!   call put_to_xgrid (Ice%t_surf,  'OCN', ex_t_surf, xmap_sfc) !put OCN temp on the exgrid
