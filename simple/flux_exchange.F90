@@ -17,7 +17,9 @@
 !* License along with FMS Coupler.
 !* If not, see <http://www.gnu.org/licenses/>.
 !***********************************************************************
-!
+!> \file
+!> \brief Routines to handle flux exchanges through exchange grids for the
+!! simple coupler.
 module flux_exchange_mod
 
 !-----------------------------------------------------------------------
@@ -766,6 +768,8 @@ subroutine flux_up_to_atmos (Time, Land, Ice, Boundary )
 !------ allocate land-ice-atmos boundary
 
    allocate( land_ice_atmos_boundary%t(is:ie,js:je) )
+   allocate( land_ice_atmos_boundary%u_ref(is:ie,js:je) )
+   allocate( land_ice_atmos_boundary%v_ref(is:ie,js:je) )
    allocate( land_ice_atmos_boundary%t_ref(is:ie,js:je) )
    allocate( land_ice_atmos_boundary%q_ref(is:ie,js:je) )
    allocate( land_ice_atmos_boundary%albedo(is:ie,js:je) )
